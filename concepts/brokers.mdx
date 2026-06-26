@@ -1,0 +1,76 @@
+---
+title: "Broker Backends: Redis, RabbitMQ, and SurrealDB"
+sidebarTitle: "Brokers"
+description: "Broccoli supports Redis, RabbitMQ, and SurrealDB backends. Learn how URL-based broker selection works and what each backend supports."
+---
+
+Broccoli abstracts message broker details behind a single `BroccoliQueue` interface. The broker backend is selected automatically from the connection URL prefix — switching backends requires only a URL change and the appropriate Cargo feature flag.
+
+## URL-Based Broker Selection
+
+Broccoli inspects the URL scheme to choose the broker implementation:
+
+| URL prefix | Broker | Feature flag |
+|------------|--------|-------------|
+| `redis://` or `rediss://` | Redis | `redis` (default) |
+| `amqp://` or `amqps://` | RabbitMQ | `rabbitmq` |
+| `ws://`, `wss://`, or `mem://` | SurrealDB | `surrealdb` |
+
+```rust
+// Redis (default feature)
+BroccoliQueue::builder("redis://localhost:6379").build().await?;
+
+// RabbitMQ (requires rabbitmq feature)
+BroccoliQueue::builder("amqp://localhost:5672").build().await?;
+
+// SurrealDB WebSocket (requires surrealdb feature)
+BroccoliQueue::builder("ws://localhost:8000").build().await?;
+
+// SurrealDB in-memory (great for tests)
+BroccoliQueue::builder("mem://").build().await?;
+```
+
+## Broker Feature Comparison
+
+| Feature | Redis | RabbitMQ | SurrealDB |
+|---------|:-----:|:--------:|:---------:|
+| Scheduling | ✓ | ✓ (plugin required) | ✓ |
+| Fairness queues | ✓ | ✗ | ✓ |
+| Management API | ✓ | ✓ | ✗ |
+| Connection pooling | bb8 | deadpool | none |
+| TLS | `rediss://` | `amqps://` | `wss://` |
+| In-memory mode | ✗ | ✗ | ✓ (`mem://`) |
+
+## The Broker Trait
+
+All three backends implement the `Broker` trait, which defines the contract for queue operations:
+
+```rust
+#[async_trait::async_trait]
+pub trait Broker: Send + Sync {
+    async fn connect(&mut self, broker_url: &str) -> Result<(), BroccoliError>;
+    async fn publish(queue_name, disambiguator, messages, options) -> Result<Vec<InternalBrokerMessage>>;
+    async fn consume(queue_name, options) -> Result<InternalBrokerMessage>;
+    async fn try_consume(queue_name, options) -> Result<Option<InternalBrokerMessage>>;
+    async fn acknowledge(queue_name, message) -> Result<()>;
+    async fn reject(queue_name, message) -> Result<()>;
+    async fn cancel(queue_name, message_id) -> Result<()>;
+    async fn size(queue_name) -> Result<HashMap<String, u64>>;
+}
+```
+
+The `BroccoliQueue` methods delegate to this trait, so the public API is identical regardless of which broker you use.
+
+## Choosing a Broker
+
+<CardGroup cols={3}>
+  <Card title="Redis" icon="database" href="/brokers/redis">
+    Best for most use cases. Full feature support, simple setup, and the default choice.
+  </Card>
+  <Card title="RabbitMQ" icon="rabbit" href="/brokers/rabbitmq">
+    Good for teams already running RabbitMQ infrastructure or needing AMQP semantics.
+  </Card>
+  <Card title="SurrealDB" icon="circle-nodes" href="/brokers/surrealdb">
+    Good for embedded use cases and testing with the in-memory `mem://` mode.
+  </Card>
+</CardGroup>

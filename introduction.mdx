@@ -1,0 +1,79 @@
+---
+title: "Broccoli: Async Message Queue Library for Rust"
+sidebarTitle: "Introduction"
+description: "Broccoli is a Tokio-powered message queue library for Rust with multi-broker support, retry strategies, scheduling, and fairness queuing — a Celery alternative."
+---
+
+Broccoli is a robust, asynchronous message queue library for Rust applications. If you've used Celery in Python and want the same ergonomics with Rust's performance and compile-time type safety, Broccoli provides a familiar API backed by multiple message broker implementations.
+
+Published on crates.io as [`broccoli_queue`](https://crates.io/crates/broccoli_queue), it builds on Tokio for async I/O and uses serde for type-safe message serialization. A single `BroccoliQueue` instance handles publishing, consuming, retries, and scheduling — regardless of which broker you're connected to.
+
+## Key Features
+
+- **Async message processing** — built on Tokio; non-blocking publish and consume operations
+- **Multi-broker support** — Redis (default), RabbitMQ, and SurrealDB with a consistent API
+- **Configurable retry strategies** — automatic retries with configurable attempt limits
+- **Connection pooling** — bb8 for Redis, deadpool for RabbitMQ
+- **Type-safe messages** — any `serde`-compatible type as a message payload
+- **Message scheduling** — delay messages or schedule them for a specific time
+- **Priority queuing** — five priority levels (1 highest to 5 lowest)
+- **Fairness queuing** — round-robin consumption across tenant/user groups via disambiguators
+- **Concurrent processing** — configurable worker pool via `process_messages`
+- **Management API** — optional feature for queue introspection at runtime
+
+## Feature Flags
+
+Broccoli uses Cargo feature flags to keep the dependency footprint small. Enable only the broker you need:
+
+| Feature | Default | Description |
+|---------|:-------:|-------------|
+| `redis` | ✓ | Redis broker via `bb8-redis` |
+| `rabbitmq` |  | RabbitMQ via `lapin` + `deadpool-lapin` |
+| `surrealdb` |  | SurrealDB broker |
+| `management` |  | Queue introspection API (`queue_status`) |
+
+At least one broker feature must be enabled, or the crate will fail to compile.
+
+## Supported Brokers
+
+<CardGroup cols={3}>
+  <Card title="Redis" icon="database" href="/brokers/redis">
+    Default broker. Full feature support: scheduling, fairness, management API.
+  </Card>
+  <Card title="RabbitMQ" icon="rabbit" href="/brokers/rabbitmq">
+    AMQP broker. Scheduling via the delayed exchange plugin.
+  </Card>
+  <Card title="SurrealDB" icon="circle-nodes" href="/brokers/surrealdb">
+    Embedded or remote. In-memory mode ideal for testing.
+  </Card>
+</CardGroup>
+
+## Roadmap
+
+- [x] Redis broker
+- [x] RabbitMQ broker
+- [x] Message scheduling
+- [x] Fairness queuing
+- [ ] Kafka broker support
+- [ ] Proc macros for building workers
+- [ ] Web interface for job monitoring
+- [ ] Enhanced metrics and monitoring
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Publish and consume your first message in under five minutes.
+  </Card>
+  <Card title="Installation" icon="box" href="/installation">
+    Add Broccoli to Cargo.toml with the right feature flags.
+  </Card>
+  <Card title="Core Concepts" icon="book-open" href="/concepts/queue">
+    Understand queues, messages, brokers, and retry strategies.
+  </Card>
+  <Card title="API Reference" icon="code" href="/api/broccoli-queue">
+    Complete reference for BroccoliQueue and all types.
+  </Card>
+</CardGroup>
+
+<Note>
+  Broccoli is actively developed. Feedback and contributions are welcome on [GitHub](https://github.com/densumesh/broccoli).
+</Note>

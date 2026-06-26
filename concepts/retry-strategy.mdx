@@ -1,0 +1,67 @@
+---
+title: "Configuring Message Retry Strategies"
+sidebarTitle: "Retry Strategy"
+description: "Use RetryStrategy to control how many times Broccoli retries a failed message before permanently moving it to the failed queue."
+---
+
+When a message handler returns an error, Broccoli doesn't discard the message immediately. Instead, it follows the configured `RetryStrategy` — retrying the message up to a maximum number of times before moving it to the failed queue. This gives transient failures a chance to resolve without manual intervention.
+
+## RetryStrategy Fields
+
+```rust
+use broccoli_queue::queue::RetryStrategy;
+
+pub struct RetryStrategy {
+    pub retry_failed: bool,   // default: true
+    pub attempts: Option<u8>, // default: Some(3)
+}
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `retry_failed` | `bool` | `true` | Whether to retry messages that fail. Set to `false` to skip retries and go directly to the failed queue. |
+| `attempts` | `Option<u8>` | `Some(3)` | Maximum number of delivery attempts before the message is moved to the failed queue. |
+
+## Builder Methods
+
+`RetryStrategy` uses a const fluent builder:
+
+```rust
+// Default: 3 attempts, retries enabled
+let strategy = RetryStrategy::default();
+
+// Custom: 5 attempts, retries enabled
+let strategy = RetryStrategy::new().with_attempts(5);
+
+// Disable retries — failed messages go straight to failed queue
+let strategy = RetryStrategy::new().retry_failed(false);
+```
+
+## Attaching to a Queue
+
+Pass the strategy via the queue builder:
+
+```rust
+use broccoli_queue::queue::{BroccoliQueue, RetryStrategy};
+
+let queue = BroccoliQueue::builder("redis://localhost:6379")
+    .failed_message_retry_strategy(RetryStrategy::new().with_attempts(5))
+    .build()
+    .await?;
+```
+
+## Queue Naming Convention
+
+Broccoli uses predictable queue names for internal state:
+
+| Queue | Name | Description |
+|-------|------|-------------|
+| Main queue | `{topic}` | Messages waiting to be consumed |
+| Processing queue | `{topic}_processing` | Messages currently being handled |
+| Failed queue | `{topic}_failed` | Messages that exhausted all retry attempts |
+
+For example, publishing to topic `"jobs"` uses `jobs`, `jobs_processing`, and `jobs_failed`.
+
+<Note>
+  Monitor the failed queue using `queue.size("jobs_failed").await` to detect persistent failures. With the `management` feature enabled, `queue.queue_status("jobs", None).await` returns the failed count directly.
+</Note>

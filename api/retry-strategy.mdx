@@ -1,0 +1,73 @@
+---
+title: "RetryStrategy Reference"
+sidebarTitle: "RetryStrategy"
+description: "Configure automatic retries for failed messages with RetryStrategy. Control the maximum attempt count and whether retries are enabled at all."
+---
+
+`RetryStrategy` controls how Broccoli handles messages whose handlers return an error. By default, Broccoli retries failed messages up to 3 times before moving them to the `{topic}_failed` queue. You can increase the retry limit, decrease it, or disable retries entirely.
+
+## Fields
+
+<ParamField path="retry_failed" type="bool" default="true">
+  Whether to retry messages that fail processing. When `true`, failed messages are requeued with an incremented `attempts` counter. When `false`, failed messages are moved directly to the failed queue on first failure.
+</ParamField>
+
+<ParamField path="attempts" type="Option<u8>" default="Some(3)">
+  Maximum number of delivery attempts. After this many failures, the message is moved to `{topic}_failed`. Includes the initial attempt — setting `attempts: Some(3)` means 1 initial delivery + 2 retries.
+</ParamField>
+
+## Builder Methods
+
+All builder methods are `const` and return `Self`, supporting compile-time construction:
+
+```rust
+pub const fn new() -> Self
+pub const fn with_attempts(mut self, attempts: u8) -> Self
+pub const fn retry_failed(mut self, retry_failed: bool) -> Self
+```
+
+## Examples
+
+### Default: 3 attempts
+
+```rust
+use broccoli_queue::queue::{BroccoliQueue, RetryStrategy};
+
+let queue = BroccoliQueue::builder("redis://localhost:6379")
+    .failed_message_retry_strategy(Default::default())
+    .build()
+    .await?;
+```
+
+### Custom: 5 attempts
+
+```rust
+let queue = BroccoliQueue::builder("redis://localhost:6379")
+    .failed_message_retry_strategy(
+        RetryStrategy::new().with_attempts(5)
+    )
+    .build()
+    .await?;
+```
+
+### No retries: move to failed queue immediately
+
+```rust
+let queue = BroccoliQueue::builder("redis://localhost:6379")
+    .failed_message_retry_strategy(
+        RetryStrategy::new().retry_failed(false)
+    )
+    .build()
+    .await?;
+```
+
+## How Retries Work
+
+When a handler returns `Err(...)`:
+
+1. Broccoli calls `reject()` on the message
+2. The message's `attempts` counter is incremented
+3. If `attempts < max_attempts` and `retry_failed == true`: message is requeued in the main topic
+4. If `attempts >= max_attempts` or `retry_failed == false`: message is moved to `{topic}_failed`
+
+You can inspect the current attempt count inside your handler via `msg.attempts`.

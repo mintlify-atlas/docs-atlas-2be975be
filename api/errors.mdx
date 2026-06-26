@@ -1,0 +1,93 @@
+---
+title: "BroccoliError Reference"
+sidebarTitle: "Errors"
+description: "BroccoliError covers all error conditions in Broccoli — from connection failures to serialization errors and SurrealDB concurrency conflicts."
+---
+
+`BroccoliError` is the unified error type returned by all Broccoli public API methods. It's derived with [`thiserror`](https://docs.rs/thiserror), implementing both `std::error::Error` and `Display`. Match on specific variants to handle different failure modes in your application.
+
+## Error Variants
+
+| Variant | Feature gate | When it occurs |
+|---------|:------------:|----------------|
+| `Broker(String)` | — | Connection failures, pool initialization errors |
+| `ConnectionTimeout(u32)` | — | Timed out waiting for a connection after N retries |
+| `Publish(String)` | — | Failed to send message to broker, serialization errors |
+| `Consume(String)` | — | Failed to retrieve message, deserialization errors |
+| `Acknowledge(String)` | — | Failed to remove message from processing queue |
+| `Reject(String)` | — | Failed to move message to retry/failed queue |
+| `Cancel(String)` | — | Failed to delete message from queue |
+| `GetMessagePosition(String)` | — | Failed to retrieve a message's queue position |
+| `Serialization(serde_json::Error)` | — | JSON payload serialization or deserialization failure |
+| `Job(String)` | — | Job processing error (returned from handlers) |
+| `QueueStatus(String)` | — | Failed to retrieve queue status |
+| `BrokerNonIdempotentOp(String)` | — | Concurrent read conflict (SurrealDB); cannot safely retry |
+| `BrokerNonIdempotentRetriableOp(String)` | — | Concurrent write conflict (SurrealDB); can be retried |
+| `NotImplemented` | — | Feature not available for this broker backend |
+| `Redis(redis::RedisError)` | `redis` | Low-level Redis error |
+| `SurrealDB(surrealdb::Error)` | `surrealdb` | SurrealDB-specific error |
+
+## Matching on Errors
+
+```rust
+use broccoli_queue::error::BroccoliError;
+
+match queue.publish("jobs", None, &payload, None).await {
+    Ok(msg) => {
+        println!("Published task: {}", msg.task_id);
+    }
+    Err(BroccoliError::Publish(e)) => {
+        eprintln!("Could not publish message: {}", e);
+    }
+    Err(BroccoliError::ConnectionTimeout(retries)) => {
+        eprintln!("Broker unreachable after {} retries", retries);
+    }
+    Err(BroccoliError::Serialization(e)) => {
+        eprintln!("Message payload could not be serialized: {}", e);
+    }
+    Err(e) => {
+        eprintln!("Unexpected error: {}", e);
+    }
+}
+```
+
+## SurrealDB Concurrency Errors
+
+When using the SurrealDB broker with concurrent workers, you may encounter `BrokerNonIdempotentOp` if two tasks attempt to read the same message simultaneously. `process_messages` handles this automatically by logging the error and retrying. If you're calling `consume()` manually from multiple tasks, handle it yourself:
+
+```rust
+use broccoli_queue::error::BroccoliError;
+
+match queue.consume::<MyPayload>("jobs", None).await {
+    Ok(msg) => { /* process */ }
+    Err(BroccoliError::BrokerNonIdempotentOp(_)) => {
+        // Another worker consumed this message — skip and continue
+        continue;
+    }
+    Err(BroccoliError::BrokerNonIdempotentRetriableOp(_)) => {
+        // Transient write conflict — safe to retry
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        continue;
+    }
+    Err(e) => return Err(e),
+}
+```
+
+## `NotImplemented`
+
+Some features are not available on all broker backends. For example, getting a message's queue position is not supported on RabbitMQ and returns `BroccoliError::NotImplemented`. Check the [broker comparison table](/concepts/brokers#broker-feature-comparison) for feature availability.
+
+## Display and std::error::Error
+
+All variants implement `Display` through `thiserror`, making them compatible with `Box<dyn std::error::Error>` and the `?` operator:
+
+```rust
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let queue = BroccoliQueue::builder("redis://localhost:6379")
+        .build()
+        .await?; // BroccoliError converts via Into<Box<dyn Error>>
+
+    Ok(())
+}
+```

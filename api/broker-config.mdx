@@ -1,0 +1,112 @@
+---
+title: "BrokerConfig and Broker Trait Reference"
+sidebarTitle: "BrokerConfig"
+description: "BrokerConfig is the internal configuration passed to broker implementations. The Broker trait defines the interface for custom broker backends in Broccoli."
+---
+
+`BrokerConfig` is an internal configuration struct that Broccoli assembles from `BroccoliQueueBuilder` settings before passing it to the broker implementation. The `Broker` trait defines the contract that all broker implementations must satisfy, and is the starting point for implementing a custom backend.
+
+## BrokerConfig
+
+`BrokerConfig` is populated automatically from your `BroccoliQueueBuilder` calls. You don't construct it directly — configure these values through the builder methods on `BroccoliQueue::builder(...)`.
+
+```rust
+#[derive(Debug, Clone)]
+pub struct BrokerConfig {
+    pub retry_attempts: Option<u8>,       // default: Some(3)
+    pub retry_failed: Option<bool>,       // default: Some(true)
+    pub pool_connections: Option<u8>,     // default: Some(10)
+    pub enable_scheduling: Option<bool>,  // default: Some(false)
+    // surrealdb_connection (surrealdb feature only)
+}
+```
+
+### Fields
+
+<ResponseField name="retry_attempts" type="Option<u8>" default="Some(3)">
+  Maximum number of delivery attempts before a message is moved to the failed queue. Set via `RetryStrategy::with_attempts(n)`.
+</ResponseField>
+
+<ResponseField name="retry_failed" type="Option<bool>" default="Some(true)">
+  Whether to retry failed messages. Set via `RetryStrategy::retry_failed(bool)`.
+</ResponseField>
+
+<ResponseField name="pool_connections" type="Option<u8>" default="Some(10)">
+  Connection pool size. Set via `.pool_connections(n)` on the builder.
+</ResponseField>
+
+<ResponseField name="enable_scheduling" type="Option<bool>" default="Some(false)">
+  Whether message scheduling (delay/scheduled_at) is enabled. Set via `.enable_scheduling(bool)` on the builder.
+</ResponseField>
+
+<ResponseField name="surrealdb_connection" type="Option<Surreal<Any>>" optional>
+  An existing SurrealDB connection to reuse. Set via `BroccoliQueue::builder_with(db)`. Only available with the `surrealdb` feature.
+</ResponseField>
+
+---
+
+## The `Broker` Trait
+
+The `Broker` trait is the interface that all broker backends implement. It's useful if you want to implement a custom broker backend.
+
+```rust
+#[async_trait::async_trait]
+pub trait Broker: Send + Sync {
+    async fn connect(&mut self, broker_url: &str) -> Result<(), BroccoliError>;
+
+    async fn publish(
+        &self,
+        queue_name: &str,
+        disambiguator: Option<String>,
+        messages: &[InternalBrokerMessage],
+        options: Option<PublishOptions>,
+    ) -> Result<Vec<InternalBrokerMessage>, BroccoliError>;
+
+    async fn try_consume(
+        &self,
+        queue_name: &str,
+        options: Option<ConsumeOptions>,
+    ) -> Result<Option<InternalBrokerMessage>, BroccoliError>;
+
+    // Default implementation: calls try_consume in a loop
+    async fn try_consume_batch(
+        &self,
+        queue_name: &str,
+        batch_size: usize,
+        options: Option<ConsumeOptions>,
+    ) -> Result<Vec<InternalBrokerMessage>, BroccoliError>;
+
+    async fn consume(
+        &self,
+        queue_name: &str,
+        options: Option<ConsumeOptions>,
+    ) -> Result<InternalBrokerMessage, BroccoliError>;
+
+    async fn acknowledge(
+        &self,
+        queue_name: &str,
+        message: InternalBrokerMessage,
+    ) -> Result<(), BroccoliError>;
+
+    async fn reject(
+        &self,
+        queue_name: &str,
+        message: InternalBrokerMessage,
+    ) -> Result<(), BroccoliError>;
+
+    async fn cancel(
+        &self,
+        queue_name: &str,
+        message_id: String,
+    ) -> Result<(), BroccoliError>;
+
+    async fn size(
+        &self,
+        queue_name: &str,
+    ) -> Result<HashMap<String, u64>, BroccoliError>;
+}
+```
+
+`try_consume_batch` has a default implementation that calls `try_consume` in a loop up to `batch_size` times. Custom brokers can override this for more efficient batch reads.
+
+`InternalBrokerMessage` is the wire format used internally — it stores the payload as a serialized JSON string and the task ID as a `String`. The public `BrokerMessage<T>` type is deserialized from `InternalBrokerMessage` via `into_message::<T>()`.

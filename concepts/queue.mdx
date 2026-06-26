@@ -1,0 +1,76 @@
+---
+title: "How the BroccoliQueue Works"
+sidebarTitle: "Queue"
+description: "Understand how BroccoliQueue manages broker connections, connection pooling, and the lifecycle of publishing and consuming messages in Broccoli."
+---
+
+`BroccoliQueue` is the primary entry point for all Broccoli operations. It's a thread-safe, cloneable handle to a connection pool backed by one of the supported message brokers. You create it once, clone it freely across async tasks, and call publish and consume methods on it.
+
+## Building a Queue
+
+All queue configuration goes through `BroccoliQueueBuilder`, obtained by calling `BroccoliQueue::builder(url)`:
+
+```rust
+use broccoli_queue::queue::{BroccoliQueue, RetryStrategy};
+
+let queue = BroccoliQueue::builder("redis://localhost:6379")
+    .pool_connections(10)
+    .failed_message_retry_strategy(
+        RetryStrategy::new().with_attempts(3)
+    )
+    .enable_scheduling(false)
+    .build()
+    .await?;
+```
+
+### Builder Options
+
+| Method | Type | Default | Description |
+|--------|------|---------|-------------|
+| `pool_connections(n)` | `u8` | `10` | Connection pool size |
+| `failed_message_retry_strategy(s)` | `RetryStrategy` | 3 attempts | Retry behavior for failed messages |
+| `enable_scheduling(b)` | `bool` | `false` | Enable delayed/scheduled message delivery |
+
+`.build().await` establishes the broker connection and returns `Result<BroccoliQueue, BroccoliError>`. The connection pool is created at this point — not lazily.
+
+## Cloning and Sharing
+
+`BroccoliQueue` wraps its broker in an `Arc`, so cloning is cheap and the underlying pool is shared:
+
+```rust
+let queue = BroccoliQueue::builder("redis://localhost:6379")
+    .build().await?;
+
+// Clone to share across tasks — same connection pool
+let queue_clone = queue.clone();
+tokio::spawn(async move {
+    queue_clone.process_messages("jobs", Some(2), None, handler).await.unwrap();
+});
+```
+
+## Connection Pooling
+
+- **Redis**: uses [bb8-redis](https://docs.rs/bb8-redis) with a configurable maximum pool size. Connection timeout is 2 seconds.
+- **RabbitMQ**: uses [deadpool-lapin](https://docs.rs/deadpool-lapin) with the same pool size setting.
+- **SurrealDB**: no pooling; uses a single `Surreal<Any>` connection.
+
+## SurrealDB: Reusing an Existing Connection
+
+If your application already has a SurrealDB connection, pass it directly with `builder_with`:
+
+```rust
+use surrealdb::{Surreal, engine::any};
+
+let db: Surreal<surrealdb::engine::any::Any> =
+    Surreal::new::<any::Any>("ws://localhost:8000").await?;
+
+let queue = BroccoliQueue::builder_with(db)
+    .build()
+    .await?;
+```
+
+This requires the `surrealdb` feature flag.
+
+## Management Feature
+
+With `features = ["management"]` in Cargo.toml, the `queue_status()` method becomes available, enabling runtime introspection of queue depth, processing count, and failed message count. See the [Management API guide](/guides/management-api) for details.

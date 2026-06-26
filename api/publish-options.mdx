@@ -1,0 +1,111 @@
+---
+title: "PublishOptions Reference"
+sidebarTitle: "PublishOptions"
+description: "Configure per-message TTL, priority, delay, and scheduled delivery time using PublishOptions and its fluent builder in Broccoli."
+---
+
+`PublishOptions` controls how a message is handled when published to the broker. You can set a time-to-live, a priority level, a relative delivery delay, or an absolute scheduled delivery time. Options are applied per-publish call — different messages on the same queue can have different options.
+
+## Fields
+
+<ParamField path="ttl" type="Option<time::Duration>">
+  Time-to-live for the message. The message is discarded by the broker if not consumed before this duration elapses.
+</ParamField>
+
+<ParamField path="priority" type="Option<u8>">
+  Message priority level, where `1` is the highest priority and `5` is the lowest. Defaults to `5` if not set. Must be in the range 1–5 or the builder will panic.
+</ParamField>
+
+<ParamField path="delay" type="Option<time::Duration>">
+  Delay before the message becomes visible to consumers. Requires `enable_scheduling(true)` on the queue builder.
+</ParamField>
+
+<ParamField path="scheduled_at" type="Option<time::OffsetDateTime>">
+  Absolute time at which the message should be delivered. Requires `enable_scheduling(true)` on the queue builder.
+</ParamField>
+
+## Builder
+
+Use `PublishOptions::builder()` for a fluent construction API:
+
+```rust
+use broccoli_queue::queue::{BroccoliQueue, PublishOptions};
+use time::Duration;
+
+// Via builder
+let options = PublishOptions::builder()
+    .priority(1)
+    .delay(Duration::seconds(30))
+    .build();
+
+queue.publish("jobs", None, &payload, Some(options)).await?;
+```
+
+### Builder Methods
+
+<ParamField path="ttl" type="time::Duration">
+  Sets the message time-to-live.
+</ParamField>
+
+<ParamField path="delay" type="time::Duration">
+  Sets a relative delivery delay.
+</ParamField>
+
+<ParamField path="schedule_at" type="time::OffsetDateTime">
+  Sets an absolute scheduled delivery time.
+</ParamField>
+
+<ParamField path="priority" type="u8">
+  Sets the priority level (1–5). Panics if the value is outside this range.
+</ParamField>
+
+## Struct Literal
+
+You can also construct `PublishOptions` as a struct literal:
+
+```rust
+use broccoli_queue::queue::PublishOptions;
+use time::Duration;
+
+let options = PublishOptions {
+    delay: Some(Duration::seconds(10)),
+    priority: Some(1),
+    ttl: None,
+    scheduled_at: None,
+};
+```
+
+## Examples
+
+```rust
+use broccoli_queue::queue::PublishOptions;
+use time::{Duration, OffsetDateTime};
+
+// High priority, immediate delivery
+let opts = PublishOptions::builder().priority(1).build();
+
+// Delay delivery by 5 minutes
+let opts = PublishOptions::builder()
+    .delay(Duration::minutes(5))
+    .build();
+
+// Schedule for a specific time
+let tomorrow = OffsetDateTime::now_utc() + Duration::days(1);
+let opts = PublishOptions::builder()
+    .schedule_at(tomorrow)
+    .build();
+
+// TTL of 1 hour with priority
+let opts = PublishOptions::builder()
+    .ttl(Duration::hours(1))
+    .priority(2)
+    .build();
+```
+
+<Warning>
+  The `priority()` builder method panics at runtime if the value is not between 1 and 5. Validate user input before calling it.
+</Warning>
+
+<Note>
+  Using `delay` or `scheduled_at` requires calling `.enable_scheduling(true)` on the `BroccoliQueueBuilder`. For RabbitMQ, the `rabbitmq_delayed_message_exchange` plugin must also be installed.
+</Note>

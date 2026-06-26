@@ -1,0 +1,102 @@
+---
+title: "Using SurrealDB as the Broccoli Message Broker"
+sidebarTitle: "SurrealDB"
+description: "Use SurrealDB as the Broccoli broker for embedded or remote setups. Supports in-memory for testing, WebSocket remote, and existing connection reuse."
+---
+
+Broccoli supports SurrealDB as a message broker via the `surrealdb` Cargo feature. It's particularly useful for testing (with the in-memory `mem://` mode) and for applications that already use SurrealDB and want to reuse an existing connection. SurrealDB supports scheduling and fairness queuing.
+
+## Installation
+
+Disable the default `redis` feature and enable `surrealdb`:
+
+```toml Cargo.toml
+[dependencies]
+broccoli_queue = { version = "0.4", default-features = false, features = ["surrealdb"] }
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+```
+
+## Connection Modes
+
+| URL scheme | Example | Description |
+|-----------|---------|-------------|
+| `mem://` | `mem://` | In-memory; ephemeral, ideal for tests |
+| `ws://` | `ws://localhost:8000` | WebSocket connection to remote SurrealDB |
+| `wss://` | `wss://db.example.com:8000` | TLS WebSocket |
+
+## Creating a Queue from URL
+
+The simplest approach — Broccoli creates and owns the SurrealDB connection:
+
+```rust
+use broccoli_queue::queue::BroccoliQueue;
+
+let queue = BroccoliQueue::builder("ws://localhost:8000")
+    .failed_message_retry_strategy(Default::default())
+    .build()
+    .await?;
+```
+
+## In-Memory Mode for Testing
+
+Use `mem://` for unit and integration tests without a running SurrealDB instance:
+
+```rust
+#[tokio::test]
+async fn test_queue_roundtrip() {
+    let queue = BroccoliQueue::builder("mem://")
+        .build()
+        .await
+        .expect("queue build failed");
+
+    // publish and consume in-process
+}
+```
+
+<Note>
+  The `mem://` backend is ephemeral — all messages are lost when the process exits. Do not use it in production.
+</Note>
+
+## Reusing an Existing Connection
+
+If your application already manages a SurrealDB connection, pass it directly using `builder_with`:
+
+```rust
+use surrealdb::{Surreal, engine::any};
+
+let db: Surreal<surrealdb::engine::any::Any> =
+    Surreal::new::<any::Any>("ws://localhost:8000").await?;
+
+// Sign in, select namespace/database, etc.
+db.signin(surrealdb::opt::auth::Root {
+    username: "root",
+    password: "root",
+}).await?;
+db.use_ns("app").use_db("jobs").await?;
+
+let queue = BroccoliQueue::builder_with(db)
+    .failed_message_retry_strategy(Default::default())
+    .build()
+    .await?;
+```
+
+## Concurrency Notes
+
+SurrealDB doesn't support fully concurrent reads on the same table in all configurations. Broccoli handles this by catching `BrokerNonIdempotentOp` errors in `process_messages` and logging them rather than crashing. If you call `consume()` manually from multiple concurrent tasks against SurrealDB, be prepared to handle this error.
+
+```rust
+match queue.consume::<MyPayload>("jobs", None).await {
+    Ok(msg) => { /* process */ }
+    Err(BroccoliError::BrokerNonIdempotentOp(_)) => {
+        // Another concurrent consumer won the race — retry or skip
+    }
+    Err(e) => return Err(e),
+}
+```
+
+## Limitations
+
+<Warning>
+  The management API (`queue_status`) is **not supported** for the SurrealDB broker. Use `queue.size(queue_name)` for basic queue depth monitoring.
+</Warning>

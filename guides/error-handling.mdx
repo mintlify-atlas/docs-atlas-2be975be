@@ -1,0 +1,135 @@
+---
+title: "Handling Errors in Broccoli Applications"
+sidebarTitle: "Error Handling"
+description: "All Broccoli operations return Result<T, BroccoliError>. Match on error variants, build resilient handlers, and monitor the failed queue for dead letters."
+---
+
+Every Broccoli public API method returns `Result<_, BroccoliError>`. The `BroccoliError` enum is derived with [`thiserror`](https://docs.rs/thiserror), so all variants implement `std::error::Error` and `Display`. Matching on specific variants lets you build resilient message processing pipelines with targeted recovery logic.
+
+## Error Variants
+
+| Variant | Feature gate | When it occurs |
+|---------|:------------:|----------------|
+| `Broker(String)` | — | Connection or pool initialization failure |
+| `ConnectionTimeout(u32)` | — | Timed out after N connection retry attempts |
+| `Publish(String)` | — | Failed to send message to broker |
+| `Consume(String)` | — | Failed to retrieve message from broker |
+| `Acknowledge(String)` | — | Failed to remove message from processing queue |
+| `Reject(String)` | — | Failed to move message to failed/retry queue |
+| `Cancel(String)` | — | Failed to delete message from queue |
+| `GetMessagePosition(String)` | — | Failed to retrieve message position |
+| `Serialization(serde_json::Error)` | — | JSON serialization or deserialization failure |
+| `Redis(redis::RedisError)` | `redis` | Redis-specific low-level error |
+| `SurrealDB(surrealdb::Error)` | `surrealdb` | SurrealDB-specific error |
+| `Job(String)` | — | Job processing error |
+| `QueueStatus(String)` | — | Failed to retrieve queue status |
+| `BrokerNonIdempotentOp(String)` | — | Concurrent read conflict (SurrealDB); cannot retry safely |
+| `BrokerNonIdempotentRetriableOp(String)` | — | Concurrent write conflict (SurrealDB); can be retried |
+| `NotImplemented` | — | Feature not available for this broker (e.g., message position on RabbitMQ) |
+
+## Matching on Errors
+
+```rust
+use broccoli_queue::error::BroccoliError;
+
+match queue.publish("jobs", None, &payload, None).await {
+    Ok(msg) => {
+        println!("Published task: {}", msg.task_id);
+    }
+    Err(BroccoliError::Publish(e)) => {
+        eprintln!("Publish failed: {}", e);
+    }
+    Err(BroccoliError::ConnectionTimeout(retries)) => {
+        eprintln!("Could not connect after {} retries", retries);
+    }
+    Err(BroccoliError::Serialization(e)) => {
+        eprintln!("Payload serialization error: {}", e);
+    }
+    Err(e) => {
+        eprintln!("Unexpected error: {}", e);
+    }
+}
+```
+
+## Errors in Message Handlers
+
+In `process_messages`, returning `Err` from your handler causes Broccoli to call `reject()` on the message. Rejection triggers the retry strategy — the message is requeued with an incremented `attempts` counter until the retry limit is reached, at which point it's moved to `{topic}_failed`.
+
+```rust
+queue.process_messages(
+    "jobs",
+    Some(4),
+    None,
+    |msg: BrokerMessage<JobPayload>| async move {
+        match process_job(&msg.payload).await {
+            Ok(_) => Ok(()),  // message is acknowledged
+            Err(e) => {
+                // message is rejected and retried
+                Err(BroccoliError::Job(format!("Job {} failed: {}", msg.payload.id, e)))
+            }
+        }
+    },
+).await?;
+```
+
+## Custom Error Callbacks with `process_messages_with_handlers`
+
+For per-message error tracking or alerting, use `process_messages_with_handlers`:
+
+```rust
+queue.process_messages_with_handlers(
+    "jobs",
+    Some(4),
+    None,
+    // Main handler
+    |msg: BrokerMessage<JobPayload>| async move {
+        process_job(msg.payload).await
+    },
+    // On success
+    |msg: BrokerMessage<JobPayload>, _result| async move {
+        println!("Completed: {}", msg.task_id);
+        Ok(())
+    },
+    // On error — runs before message is rejected/retried
+    |msg: BrokerMessage<JobPayload>, err| async move {
+        eprintln!("Failed task {} (attempt {}): {}", msg.task_id, msg.attempts, err);
+        // Send alert, update a database, etc.
+        Ok(())
+    },
+).await?;
+```
+
+## Monitoring the Dead Letter Queue
+
+Messages that exhaust all retries land in `{topic}_failed`. Monitor this queue to detect persistent failures:
+
+```rust
+let counts = queue.size("jobs_failed").await?;
+let failed_count = counts.get("jobs_failed").copied().unwrap_or(0);
+
+if failed_count > 0 {
+    eprintln!("Alert: {} messages in the dead letter queue", failed_count);
+}
+```
+
+## Enabling Log Output
+
+Broccoli uses the [`log`](https://docs.rs/log) crate internally and emits `log::error!` calls when messages fail to consume, acknowledge, or reject. Initialize a logger in your application to capture these:
+
+```rust
+// Add env_logger to dev-dependencies
+// dev-dependencies:
+//   env_logger = "0.11"
+
+fn main() {
+    env_logger::init();
+    // or for specific log levels:
+    std::env::set_var("RUST_LOG", "broccoli_queue=debug");
+    env_logger::init();
+    // ... rest of your app
+}
+```
+
+<Tip>
+  Use `process_messages_with_handlers` when you need per-message observability. The `on_error` callback fires before the message is rejected, giving you a chance to record failure context while the message data is still available.
+</Tip>

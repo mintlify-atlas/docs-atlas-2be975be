@@ -1,0 +1,101 @@
+---
+title: "Publishing Messages to Broccoli Queues"
+sidebarTitle: "Publishing"
+description: "Publish single messages or batches to Broccoli queues with optional TTL, priority, delay, and scheduled delivery using PublishOptions."
+---
+
+Broccoli makes publishing messages to any supported broker straightforward and type‑safe.  Each message is wrapped in a `BrokerMessage<T>` that contains the payload, an optional *disambiguator* for fairness queues, and a unique identifier that the broker uses for tracking.  The queue API exposes two publishing methods:
+
+- `publish(topic, disambiguator, &message, options)` – publish a single message.
+- `publish_batch(topic, disambiguator, messages, options)` – publish an iterator of messages in one call.
+
+Both return a `Result<BrokerMessage<T>>` or `Result<Vec<BrokerMessage<T>>>`, making error handling simple.
+
+### Publishing a single message
+
+<CodeGroup>
+```rust
+use broccoli_queue::{queue::BroccoliQueue, queue::PublishOptions};
+use time::Duration;
+
+// Create the queue – scheduling requires enabling on the builder.
+let queue = BroccoliQueue::builder("redis://localhost:6379")
+    .enable_scheduling(true)
+    .build()
+    .await?;
+
+// Build publish options – e.g. a 5‑second TTL.
+let options = PublishOptions::builder()
+    .ttl(Duration::seconds(5))
+    .build();
+
+let message = queue
+    .publish("jobs", None, &"Hello, world!", Some(options))
+    .await?;
+println!("Published: {}", message.message_id);
+```
+</CodeGroup>
+
+### Publishing a batch of messages
+
+<CodeGroup>
+```rust
+let jobs = vec!["job1", "job2", "job3"];
+let batch = queue
+    .publish_batch("jobs", None, jobs, None)
+    .await?;
+println!("Batch published: {} messages", batch.len());
+```
+</CodeGroup>
+
+### Setting priority
+
+`PublishOptions::builder().priority(u8)` accepts a number between **1** (highest) and **5** (lowest).  Passing any other value causes a panic.
+
+<CodeGroup>
+```rust
+let options = PublishOptions::builder()
+    .priority(1) // highest priority
+    .build();
+```
+</CodeGroup>
+
+<Warning>
+Setting priority to a value outside 1–5 will `panic!` at runtime.  Always validate the value before building the options.
+</Warning>
+
+### Delays and scheduled delivery
+
+*Relative delay* (`delay`) is a `Duration` after which the message becomes visible.  *Absolute scheduling* (`scheduled_at`) specifies an exact `OffsetDateTime`.
+
+<CodeGroup>
+```rust
+use time::{OffsetDateTime, Duration};
+
+// Delay for 10 seconds
+let delayed = PublishOptions::builder()
+    .delay(Duration::seconds(10))
+    .build();
+
+// Schedule for a specific time
+let scheduled = PublishOptions::builder()
+    .schedule_at(OffsetDateTime::now_utc() + Duration::minutes(5))
+    .build();
+```
+</CodeGroup>
+
+<Warning>
+Do not use both `delay` and `scheduled_at` in the same options – choose one strategy.
+</Warning>
+
+### Enabling scheduling on the queue
+
+Message scheduling is a feature that some brokers support natively while others require a plugin.  To enable scheduling you must set `enable_scheduling(true)` on the `BroccoliQueueBuilder` before calling `build()`.
+
+<Note>
+RabbitMQ needs the `rabbitmq_delayed_message_exchange` plugin.  In the repository the provided `Dockerfile.rabbitmq` pre‑installs this plugin.  To enable it manually you can run:
+
+```bash
+rabbitmq-plugins enable rabbitmq_delayed_message_exchange
+```
+</Note>

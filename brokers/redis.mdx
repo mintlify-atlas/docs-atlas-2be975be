@@ -1,0 +1,76 @@
+---
+title: "Using Redis as the Broccoli Message Broker"
+sidebarTitle: "Redis"
+description: "Set up Redis as Broccoli's message broker. Covers connection URLs, TLS, connection pool sizing, and how messages are stored in sorted sets."
+---
+
+Redis is the default broker for Broccoli and is the best starting point for most applications. It's enabled by the `redis` Cargo feature (included by default) and requires no extra configuration beyond a connection URL. Redis supports the full Broccoli feature set: scheduling, fairness queuing, and the management API.
+
+## Installation
+
+No additional feature flags are needed when using the default Redis broker:
+
+```toml Cargo.toml
+[dependencies]
+broccoli_queue = "0.4"
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+```
+
+## Starting Redis
+
+For local development, start Redis with Docker:
+
+```bash
+docker run -d -p 6379:6379 redis:latest
+```
+
+## Connection URLs
+
+| Format | Example | Description |
+|--------|---------|-------------|
+| Plain | `redis://localhost:6379` | No authentication |
+| With auth | `redis://:password@localhost:6379` | Password only |
+| With user+auth | `redis://user:password@localhost:6379` | Username and password |
+| TLS | `rediss://localhost:6380` | TLS via tokio-rustls |
+
+## Creating a Queue
+
+```rust
+use broccoli_queue::queue::BroccoliQueue;
+
+let queue = BroccoliQueue::builder("redis://localhost:6379")
+    .pool_connections(10)                              // default: 10
+    .failed_message_retry_strategy(Default::default()) // 3 attempts
+    .build()
+    .await?;
+```
+
+With TLS:
+
+```rust
+let queue = BroccoliQueue::builder("rediss://my-redis.example.com:6380")
+    .pool_connections(5)
+    .build()
+    .await?;
+```
+
+## Queue Internals
+
+Broccoli uses a combination of Redis sorted sets and lists to implement reliable message delivery:
+
+| Data structure | Redis key | Purpose |
+|---------------|-----------|---------|
+| Sorted set | `{queue_name}` | Main queue; score is nanosecond timestamp (or future time for scheduling) |
+| List | `{queue_name}_processing` | Messages currently being processed |
+| Sorted set | `{queue_name}_failed` | Messages that exhausted retries |
+| Sorted set | `{queue_name}_{disambiguator}` | Per-tenant sub-queues for fairness |
+
+Messages are stored as Redis hashes with fields: `task_id`, `payload` (JSON), `attempts`, `priority`, and optionally `disambiguator`.
+
+## Configuration Notes
+
+- **Pool size**: defaults to 10 connections. Each connection has a 2-second connection timeout.
+- **Scheduling**: supported natively using the sorted set score as a delivery timestamp. Enable with `.enable_scheduling(true)` on the builder.
+- **Fairness**: supported. See the [Fairness Queues guide](/guides/fairness).
+- **Management API**: supported. Enable with `features = ["management"]` in Cargo.toml.

@@ -1,0 +1,94 @@
+---
+title: "Monitoring Queues with the Management API"
+sidebarTitle: "Management API"
+description: "Enable the management feature flag in Broccoli to inspect queue depth, processing counts, and failed message totals using queue_status and size."
+---
+
+Broccoli provides two ways to introspect queue state at runtime: the `size()` method (always available) and the `queue_status()` method (requires the `management` feature flag). Together they let you monitor how many messages are waiting, being processed, and have failed.
+
+## The `size()` Method
+
+`size()` is available on every `BroccoliQueue` instance without any additional feature flags. It returns a `HashMap<String, u64>` mapping queue names to their message counts:
+
+```rust
+use std::collections::HashMap;
+
+let counts: HashMap<String, u64> = queue.size("jobs").await?;
+
+// For a normal queue:
+// { "jobs": 42 }
+
+// For a fairness queue with disambiguators:
+// { "jobs_tenant-a": 10, "jobs_tenant-b": 32 }
+
+for (name, count) in &counts {
+    println!("{}: {} messages", name, count);
+}
+```
+
+For fairness queues, each disambiguator sub-queue appears as a separate entry in the map.
+
+## The `queue_status()` Method
+
+The `queue_status()` method provides richer detail but requires the `management` feature:
+
+```toml Cargo.toml
+broccoli_queue = { version = "0.4", features = ["management"] }
+```
+
+```rust
+use broccoli_queue::brokers::management::{QueueStatus, QueueType};
+
+let status: QueueStatus = queue
+    .queue_status("jobs".to_string(), None)
+    .await?;
+
+println!("Queue:       {}", status.name);
+println!("Type:        {}", status.queue_type); // "main", "processing", "failed", "fairness"
+println!("Waiting:     {}", status.size);
+println!("Processing:  {}", status.processing);
+println!("Failed:      {}", status.failed);
+
+if let Some(count) = status.disambiguator_count {
+    println!("Disambiguators: {}", count);
+}
+```
+
+### QueueStatus Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | `String` | The queue name |
+| `queue_type` | `QueueType` | Main, Processing, Failed, or Fairness |
+| `size` | `usize` | Number of messages waiting in the main queue |
+| `processing` | `usize` | Number of messages currently being processed |
+| `failed` | `usize` | Number of messages in the failed queue |
+| `disambiguator_count` | `Option<usize>` | Number of fairness sub-queues (fairness queues only) |
+
+### QueueType Enum
+
+`QueueType` implements `Display`, making it easy to use in log output:
+
+| Variant | Display | Meaning |
+|---------|---------|---------|
+| `Main` | `"main"` | Standard queue |
+| `Processing` | `"processing"` | In-flight messages |
+| `Failed` | `"failed"` | Exhausted retry attempts |
+| `Fairness` | `"fairness"` | Fairness (disambiguator) queue |
+
+## Monitoring the Failed Queue
+
+Use `size()` to poll for failed messages without the management feature:
+
+```rust
+let failed = queue.size("jobs_failed").await?;
+let count = failed.get("jobs_failed").copied().unwrap_or(0);
+
+if count > 0 {
+    eprintln!("WARNING: {} messages in the failed queue", count);
+}
+```
+
+<Note>
+  The management API (`queue_status`) is not supported for the SurrealDB broker. Use `size()` for SurrealDB monitoring instead.
+</Note>

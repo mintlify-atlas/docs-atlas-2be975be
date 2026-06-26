@@ -1,0 +1,72 @@
+---
+title: "Fair Message Queuing with Disambiguators"
+sidebarTitle: "Fairness Queues"
+description: "Use Broccoli's fairness queue feature to ensure round‑robin consumption across different tenant or user groups, preventing queue starvation."
+---
+
+When a single high‑volume publisher dominates a queue, other producers can get starved.  Broccoli solves this problem with **fairness queues**: each producer supplies a *disambiguator* string (e.g. a tenant‑ or user‑ID) and the broker internally routes messages to sub‑queues named `{topic}_{disambiguator}`.  Consumers then rotate over those sub‑queues, guaranteeing that every tenant sees roughly equal throughput.
+
+### Publishing with a disambiguator
+
+```rust
+let tenant = "tenant-abc".to_string();
+let msg = queue.publish("jobs", Some(tenant.clone()), &job, None).await?;
+```
+
+The `disambiguator` must be `None` for normal queues; only Redis supports fairness, so attempting to use a disambiguator with another broker will result in a `BroccoliError::NotImplemented`.
+
+### Consuming from a fairness queue
+
+```rust
+let consume_opts = ConsumeOptions::builder()
+    .fairness(true) // only valid on Redis
+    .build();
+queue.process_messages("jobs", Some(2), Some(consume_opts), |msg| async move {
+    // handle the job
+    Ok(())
+}).await?;
+```
+
+The consumer automatically rotates over each `{topic}_{disambiguator}` sub‑queue.  You can inspect the queue sizes:
+
+<CodeGroup>
+```rust
+let sizes = queue.size("jobs").await?; // returns HashMap<String, u64>
+for (q, size) in sizes {
+    println!("{q}: {} messages", size);
+}
+```
+</CodeGroup>
+
+### End‑to‑end example
+
+Below is a minimal multi‑tenant publisher that sends jobs from two tenants and a fairness consumer that processes them in a round‑robin fashion.
+
+<CodeGroup>
+```rust
+// Publisher
+let queue = BroccoliQueue::builder("redis://localhost:6379")
+    .enable_scheduling(true)
+    .build()
+    .await?;
+
+let tenants = vec!["tenant-1", "tenant-2"];
+for tenant in tenants {
+    let job = JobPayload { /* … */ };
+    queue.publish("jobs", Some(tenant.to_string()), &job, None).await?;
+}
+
+// Consumer
+let consume_opts = ConsumeOptions::builder()
+    .fairness(true)
+    .build();
+queue.process_messages("jobs", Some(3), Some(consume_opts), |msg| async move {
+    // process
+    Ok(())
+}).await?;
+```
+</CodeGroup>
+
+<Note>
+The management API can report the number of disambiguators via `QueueStatus::disambiguator_count`.
+</Note>

@@ -1,0 +1,86 @@
+---
+title: "Installing Broccoli in Your Rust Project"
+sidebarTitle: "Installation"
+description: "Add broccoli_queue to Cargo.toml with the right feature flags for Redis, RabbitMQ, or SurrealDB. Covers version pinning and feature combinations."
+---
+
+Broccoli is published to crates.io as [`broccoli_queue`](https://crates.io/crates/broccoli_queue). Add it to your project's `Cargo.toml` along with Tokio (required for async runtime) and serde (required for message serialization).
+
+## Basic Installation
+
+The simplest way to get started uses the default Redis broker:
+
+```toml Cargo.toml
+[dependencies]
+broccoli_queue = "0.4"
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+```
+
+This enables the `redis` feature by default, which pulls in `bb8-redis` and the `redis` crate.
+
+## Feature Flags
+
+Broccoli uses Cargo feature flags to control which broker implementations are compiled in. Only include what you need to keep compile times and binary size small.
+
+<Warning>
+  At least one of `redis`, `rabbitmq`, or `surrealdb` must be enabled. If you disable all broker features, the crate will fail to compile with:
+  ```
+  error: You must enable at least one of the following features: redis, rabbitmq, surrealdb
+  ```
+</Warning>
+
+### RabbitMQ only
+
+```toml Cargo.toml
+[dependencies]
+broccoli_queue = { version = "0.4", default-features = false, features = ["rabbitmq"] }
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+```
+
+### SurrealDB only
+
+```toml Cargo.toml
+[dependencies]
+broccoli_queue = { version = "0.4", default-features = false, features = ["surrealdb"] }
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+```
+
+### Redis with management API
+
+The `management` feature enables `queue_status()` for runtime queue introspection:
+
+```toml Cargo.toml
+[dependencies]
+broccoli_queue = { version = "0.4", features = ["management"] }
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+```
+
+### All brokers and features
+
+```toml Cargo.toml
+[dependencies]
+broccoli_queue = { version = "0.4", features = ["redis", "rabbitmq", "surrealdb", "management"] }
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+```
+
+## Feature Reference
+
+| Feature | Description | Extra dependencies |
+|---------|-------------|-------------------|
+| `redis` *(default)* | Redis broker | `bb8-redis`, `redis` |
+| `rabbitmq` | RabbitMQ broker | `lapin`, `deadpool-lapin` |
+| `surrealdb` | SurrealDB broker | `surrealdb` |
+| `management` | Queue introspection API | `derive_more` |
+
+## Runtime Requirements
+
+Broccoli requires the Tokio async runtime with full features enabled. The `features = ["full"]` flag on Tokio enables the runtime, I/O, timers, and sync primitives that Broccoli depends on.
+
+<Note>
+  API documentation is available on [docs.rs/broccoli_queue](https://docs.rs/broccoli_queue). All features are enabled in the docs.rs build.
+</Note>

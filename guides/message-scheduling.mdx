@@ -1,0 +1,58 @@
+---
+title: "Scheduling Delayed and Timed Messages in Broccoli"
+sidebarTitle: "Scheduling"
+description: "Schedule messages for delayed or future delivery in Broccoli using PublishOptions delay and scheduled_at fields, with setup instructions per broker."
+---
+
+Broccoli supports two forms of message scheduling: a relative delay and an absolute timestamp.  The broker must be built with scheduling enabled via `enable_scheduling(true)`; otherwise the broker will reject any scheduling options.
+
+### Enabling scheduling
+
+```rust
+let queue = BroccoliQueue::builder("redis://localhost:6380")
+    .enable_scheduling(true)
+    .build()
+    .await?;
+```
+
+The `enable_scheduling` flag is broker‑agnostic, but how the broker implements the feature varies:
+
+- **Redis** – uses sorted sets with nanosecond precision timestamps.
+- **RabbitMQ** – requires the `rabbitmq_delayed_message_exchange` plugin.
+- **SurrealDB** – scheduling is supported out of the box.
+
+### Scheduling examples
+
+<CodeGroup>
+```rust
+use time::{OffsetDateTime, Duration};
+
+// 1. Relative delay of 15 seconds
+let delayed = PublishOptions::builder()
+    .delay(Duration::seconds(15))
+    .build();
+queue.publish("jobs", None, &job, Some(delayed)).await?;
+
+// 2. Absolute time 5 minutes from now
+let scheduled = PublishOptions::builder()
+    .schedule_at(OffsetDateTime::now_utc() + Duration::minutes(5))
+    .build();
+queue.publish("jobs", None, &job, Some(scheduled)).await?;
+```
+</CodeGroup>
+
+<Warning>
+Do not combine `delay` and `scheduled_at` in the same `PublishOptions` – the broker will interpret only one of them.
+</Warning>
+
+### RabbitMQ setup
+
+If you are using RabbitMQ you must install the delayed‑exchange plugin.  In the repository the `Dockerfile.rabbitmq` already includes this plugin, but to enable it manually you can run:
+
+```bash
+rabbitmq-plugins enable rabbitmq_delayed_message_exchange
+```
+
+<Note>
+The Dockerfile in the repo pre‑installs the delayed‑exchange plugin, so a fresh build will already be ready for delayed messages.
+</Note>

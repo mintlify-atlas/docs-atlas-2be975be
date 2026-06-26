@@ -1,47 +1,175 @@
 ---
-title: "Quickstart"
-description: "Begin with a guide on the fastest path to a successful outcome"
+title: "Get Started with Broccoli in Five Minutes"
+sidebarTitle: "Quickstart"
+description: "Learn how to install Broccoli, connect to Redis, publish messages, and process them with concurrent workers in a complete working example."
 ---
 
-Describe how someone begins using your product. What is the first thing they need to do? Are there any prerequisites?
-
-A quickstart should take someone from zero to using your product. They'll get a quick win and a sense of what they can accomplish.
+Broccoli lets you enqueue and process jobs across Rust services with minimal setup. This guide walks you through adding the crate, defining a message type, publishing to a queue, and consuming messages — you'll have a working producer-consumer pair in minutes.
 
 ## Prerequisites
 
-Before you begin, you must have:
-
-- Requirement one (for example, Node.js 18+, a free account, an API key)
-- Requirement two (for example, a compatible device, a compatible browser, a compatible operating system)
-
-## Get started
+- Rust 1.70+ and Cargo
+- A running Redis instance (see [Redis broker setup](/brokers/redis) or run `docker run -d -p 6379:6379 redis:latest`)
 
 <Steps>
-  <Step title="Install">
-    Describe how to install your product or sign up.
+  <Step title="Add Broccoli to Cargo.toml">
+    Add the dependency along with Tokio and serde:
 
-    ```bash
-    npm install your-package
+    ```toml Cargo.toml
+    [dependencies]
+    broccoli_queue = "0.4"
+    tokio = { version = "1", features = ["full"] }
+    serde = { version = "1", features = ["derive"] }
     ```
   </Step>
-  <Step title="Configure">
-    Describe any setup or configuration needed before first use.
 
-    ```bash
-    your-cli init
+  <Step title="Define your message type">
+    Any type that implements `Clone`, `Serialize`, and `Deserialize` can be used as a message payload:
+
+    ```rust
+    use serde::{Deserialize, Serialize};
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    struct JobPayload {
+        id: String,
+        task_name: String,
+    }
     ```
   </Step>
-  <Step title="Run it">
-    Show the first thing a user does to see it working.
 
-    ```bash
-    your-cli start
+  <Step title="Create a BroccoliQueue">
+    Use the builder to connect to your broker:
+
+    ```rust
+    use broccoli_queue::queue::BroccoliQueue;
+
+    let queue = BroccoliQueue::builder("redis://localhost:6379")
+        .pool_connections(5)
+        .failed_message_retry_strategy(Default::default())
+        .build()
+        .await?;
     ```
+
+    The builder connects and creates a connection pool. `failed_message_retry_strategy(Default::default())` enables 3 automatic retries on failure.
+  </Step>
+
+  <Step title="Publish messages">
+    Publish a single message or a batch:
+
+    ```rust
+    // Single message
+    let msg = queue
+        .publish("jobs", None, &JobPayload {
+            id: "job-1".to_string(),
+            task_name: "process_data".to_string(),
+        }, None)
+        .await?;
+    println!("Published task ID: {}", msg.task_id);
+
+    // Batch publish
+    let payloads = vec![
+        JobPayload { id: "job-2".to_string(), task_name: "task_a".to_string() },
+        JobPayload { id: "job-3".to_string(), task_name: "task_b".to_string() },
+    ];
+    queue.publish_batch("jobs", None, payloads, None).await?;
+    ```
+  </Step>
+
+  <Step title="Process messages with workers">
+    `process_messages` runs a blocking loop. Pass `Some(n)` to spin up `n` concurrent Tokio tasks:
+
+    ```rust
+    use broccoli_queue::brokers::broker::BrokerMessage;
+
+    queue.process_messages(
+        "jobs",
+        Some(4),  // 4 concurrent workers
+        None,
+        |msg: BrokerMessage<JobPayload>| async move {
+            println!("Processing: {} (attempt {})", msg.payload.id, msg.attempts);
+            // Do your work here. Return Ok(()) to ack, Err(...) to reject/retry.
+            Ok(())
+        },
+    ).await?;
+    ```
+
+    Messages that return `Ok(())` are automatically acknowledged and removed from the queue. Messages that return `Err(...)` are rejected and retried according to the configured `RetryStrategy`.
   </Step>
 </Steps>
 
-<Tip>
-  Give people a way to get help. This could be a link to a support page, a chat with a customer support agent, or a forum for your product.
+## Complete Example
 
-  Example: Need help? Reach out to us at [support@yourcompany.com](mailto:support@yourcompany.com).
+### Producer
+
+```rust src/bin/producer.rs
+use broccoli_queue::queue::{BroccoliQueue, PublishOptions};
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct JobPayload {
+    id: String,
+    task_name: String,
+}
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let queue = BroccoliQueue::builder("redis://localhost:6379")
+        .pool_connections(5)
+        .failed_message_retry_strategy(Default::default())
+        .build()
+        .await?;
+
+    let jobs = vec![
+        JobPayload { id: "job-1".to_string(), task_name: "process_data".to_string() },
+        JobPayload { id: "job-2".to_string(), task_name: "generate_report".to_string() },
+    ];
+
+    let published = queue.publish_batch("jobs", None, jobs, None).await?;
+    println!("Published {} jobs", published.len());
+
+    Ok(())
+}
+```
+
+### Consumer
+
+```rust src/bin/consumer.rs
+use broccoli_queue::{
+    brokers::broker::BrokerMessage,
+    queue::BroccoliQueue,
+};
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct JobPayload {
+    id: String,
+    task_name: String,
+}
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let queue = BroccoliQueue::builder("redis://localhost:6379")
+        .pool_connections(5)
+        .failed_message_retry_strategy(Default::default())
+        .build()
+        .await?;
+
+    queue
+        .process_messages(
+            "jobs",
+            Some(4),
+            None,
+            |msg: BrokerMessage<JobPayload>| async move {
+                println!("Processing job: {} - {}", msg.payload.id, msg.payload.task_name);
+                Ok(())
+            },
+        )
+        .await?;
+
+    Ok(())
+}
+```
+
+<Tip>
+  To use RabbitMQ or SurrealDB instead of Redis, just change the broker URL and feature flags. See [Broker Setup](/brokers/redis) for connection string formats.
 </Tip>

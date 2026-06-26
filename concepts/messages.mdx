@@ -1,0 +1,73 @@
+---
+title: "Messages and Type Safety in Broccoli"
+sidebarTitle: "Messages"
+description: "How Broccoli wraps user payloads in BrokerMessage with a UUID task ID, attempt counter, and disambiguator for type-safe distributed messaging."
+---
+
+Broccoli wraps every user payload in a `BrokerMessage<T>` envelope before putting it on the wire. This envelope carries a unique task identifier, an attempt counter for retry tracking, and an optional disambiguator for fairness routing — all while keeping your payload type fully compile-time checked via generics.
+
+## BrokerMessage\<T\>
+
+```rust
+use broccoli_queue::brokers::broker::BrokerMessage;
+
+// What you receive in a handler:
+|msg: BrokerMessage<MyPayload>| async move {
+    println!("Task ID:   {}", msg.task_id);      // uuid::Uuid
+    println!("Payload:   {:?}", msg.payload);     // T
+    println!("Attempts:  {}", msg.attempts);      // u8, starts at 0
+    println!("Group:     {:?}", msg.disambiguator); // Option<String>
+    Ok(())
+}
+```
+
+### Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `task_id` | `uuid::Uuid` | Auto-generated UUID v4 assigned on first publish |
+| `payload` | `T` | The user-defined message content |
+| `attempts` | `u8` | Number of processing attempts; starts at `0`, incremented on each retry |
+| `disambiguator` | `Option<String>` | Tenant or group identifier for fairness routing; `None` for standard queues |
+
+## Defining a Payload Type
+
+Any type that implements `Clone + Serialize + DeserializeOwned` can be a message payload. Derive the required traits:
+
+```rust
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct JobPayload {
+    id: String,
+    task_name: String,
+    priority: u8,
+}
+```
+
+Broccoli serializes the payload to JSON before storing it in the broker and deserializes it back when consuming. The `BrokerMessage<T>` wrapper handles this transparently — you always work with your strongly-typed struct.
+
+## The `attempts` Field
+
+The `attempts` counter starts at `0` on the first delivery and increments each time a message is retried. You can use it in your handler to implement custom escalation logic:
+
+```rust
+|msg: BrokerMessage<JobPayload>| async move {
+    if msg.attempts >= 2 {
+        // Last attempt — log to alerting system
+        eprintln!("Final attempt for task {}", msg.task_id);
+    }
+    process_job(msg.payload).await
+}
+```
+
+## Disambiguator and Fairness
+
+Setting a disambiguator groups messages into a logical sub-queue. When consuming with `fairness: true`, Broccoli rotates through sub-queues in round-robin order, preventing any single group from starving others.
+
+```rust
+// Publish to a specific tenant's sub-queue
+queue.publish("jobs", Some("tenant-abc".to_string()), &payload, None).await?;
+```
+
+See the [Fairness Queues guide](/guides/fairness) for the full consumption setup.
