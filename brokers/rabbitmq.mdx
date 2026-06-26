@@ -1,5 +1,5 @@
 ---
-title: "Using RabbitMQ as the Broccoli Message Broker"
+title: "RabbitMQ Broker Setup and Scheduling for Broccoli"
 sidebarTitle: "RabbitMQ"
 description: "Connect Broccoli to RabbitMQ using the rabbitmq feature. Covers AMQP URLs, the delayed exchange plugin for scheduling, and deadpool connection pooling."
 ---
@@ -85,6 +85,10 @@ let queue = BroccoliQueue::builder("amqp://localhost:5672")
 
 <Warning>
   Fairness queuing (the `disambiguator` field and `ConsumeOptions::fairness`) is **not supported** on RabbitMQ. The disambiguator parameter is accepted but ignored. Use Redis if you need fairness queuing.
+</Warning>
+
+<Warning>
+  `queue.size()` and `queue.cancel()` return `BroccoliError::NotImplemented` for the RabbitMQ broker. Queue depth monitoring and direct message cancellation are not available with RabbitMQ — use the RabbitMQ management UI at `http://localhost:15672` for queue inspection instead.
 </Warning>
 
 ## Connection Pool Configuration

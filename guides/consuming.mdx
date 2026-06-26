@@ -8,7 +8,7 @@ Broccoli gives you three consumption patterns, each suitable for a different use
 
 ### 1. Blocking consume
 
-`consume(topic, options)` and `try_consume(topic, options)` are the raw API calls.  `consume` will block until a message is available, while `try_consume` returns immediately with `None` if there is nothing to consume.  The returned `BrokerMessage<T>` contains the payload and a `message_id` that you can use to **acknowledge**, **reject**, or **cancel** the message.
+`consume(topic, options)` and `try_consume(topic, options)` are the raw API calls.  `consume` will block until a message is available, while `try_consume` returns immediately with `None` if there is nothing to consume.  The returned `BrokerMessage<T>` contains the payload and a `task_id` that you can use to **acknowledge**, **reject**, or **cancel** the message.
 
 <CodeGroup>
 ```rust
@@ -80,7 +80,7 @@ All consume‑style APIs accept an optional `ConsumeOptions`.  The builder patte
 let options = ConsumeOptions::builder()
     .auto_ack(false)          // default – you must ack/reject manually
     .fairness(true)           // only for Redis
-    .consume_wait(time::Duration::milliseconds(10))
+    .consume_wait(std::time::Duration::from_millis(10))
     .handler_ack(true)        // whether the handler should automatically ack
     .build();
 ```
@@ -103,6 +103,6 @@ The broker exposes `acknowledge`, `reject`, and `cancel` methods.  The `cancel` 
 ```rust
 let msg = queue.consume::<JobPayload>("jobs", None).await?;
 // If the message is malformed – drop it permanently
-queue.cancel("jobs", msg.message_id).await?;
+queue.cancel("jobs", msg.task_id.to_string()).await?;
 ```
 </CodeGroup>

@@ -1,5 +1,5 @@
 ---
-title: "Monitoring Queues with the Management API"
+title: "Monitoring Queues with Broccoli's Management API"
 sidebarTitle: "Management API"
 description: "Enable the management feature flag in Broccoli to inspect queue depth, processing counts, and failed message totals using queue_status and size."
 ---
@@ -8,7 +8,7 @@ Broccoli provides two ways to introspect queue state at runtime: the `size()` me
 
 ## The `size()` Method
 
-`size()` is available on every `BroccoliQueue` instance without any additional feature flags. It returns a `HashMap<String, u64>` mapping queue names to their message counts:
+`size()` is available on every `BroccoliQueue` instance without any additional feature flags (Redis only; returns `NotImplemented` for RabbitMQ and SurrealDB). It returns a `HashMap<String, u64>` mapping queue names to their message counts:
 
 ```rust
 use std::collections::HashMap;
@@ -89,6 +89,8 @@ if count > 0 {
 }
 ```
 
-<Note>
-  The management API (`queue_status`) is not supported for the SurrealDB broker. Use `size()` for SurrealDB monitoring instead.
-</Note>
+<Warning>
+  Both `size()` and `queue_status()` return `BroccoliError::NotImplemented` for the **SurrealDB** broker. Queue introspection is not supported with SurrealDB.
+
+  `size()` and `cancel()` also return `BroccoliError::NotImplemented` for the **RabbitMQ** broker. Use the RabbitMQ management UI at `http://localhost:15672` for queue inspection.
+</Warning>

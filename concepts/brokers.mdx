@@ -35,8 +35,9 @@ BroccoliQueue::builder("mem://").build().await?;
 | Feature | Redis | RabbitMQ | SurrealDB |
 |---------|:-----:|:--------:|:---------:|
 | Scheduling | ✓ | ✓ (plugin required) | ✓ |
-| Fairness queues | ✓ | ✗ | ✓ |
-| Management API | ✓ | ✓ | ✗ |
+| Fairness queues | ✓ | ✗ | ✗ |
+| Management API (`queue_status`) | ✓ | ✓ (limited) | ✗ |
+| `size()` / `cancel()` | ✓ | ✗ (`NotImplemented`) | ✗ (`NotImplemented`) |
 | Connection pooling | bb8 | deadpool | none |
 | TLS | `rediss://` | `amqps://` | `wss://` |
 | In-memory mode | ✗ | ✗ | ✓ (`mem://`) |

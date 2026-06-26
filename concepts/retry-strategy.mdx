@@ -1,7 +1,7 @@
 ---
-title: "Configuring Message Retry Strategies"
+title: "Configuring Message Retry Strategies in Broccoli"
 sidebarTitle: "Retry Strategy"
-description: "Use RetryStrategy to control how many times Broccoli retries a failed message before permanently moving it to the failed queue."
+description: "Use RetryStrategy to control how many times Broccoli retries a failed message and whether retries are enabled at all. Covers fields, defaults, and builder methods."
 ---
 
 When a message handler returns an error, Broccoli doesn't discard the message immediately. Instead, it follows the configured `RetryStrategy` — retrying the message up to a maximum number of times before moving it to the failed queue. This gives transient failures a chance to resolve without manual intervention.

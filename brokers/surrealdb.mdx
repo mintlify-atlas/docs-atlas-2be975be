@@ -1,10 +1,10 @@
 ---
-title: "Using SurrealDB as the Broccoli Message Broker"
+title: "SurrealDB Broker Setup and In-Memory Testing in Broccoli"
 sidebarTitle: "SurrealDB"
 description: "Use SurrealDB as the Broccoli broker for embedded or remote setups. Supports in-memory for testing, WebSocket remote, and existing connection reuse."
 ---
 
-Broccoli supports SurrealDB as a message broker via the `surrealdb` Cargo feature. It's particularly useful for testing (with the in-memory `mem://` mode) and for applications that already use SurrealDB and want to reuse an existing connection. SurrealDB supports scheduling and fairness queuing.
+Broccoli supports SurrealDB as a message broker via the `surrealdb` Cargo feature. It's particularly useful for testing (with the in-memory `mem://` mode) and for applications that already use SurrealDB and want to reuse an existing connection. SurrealDB supports message scheduling.
 
 ## Installation
 
@@ -98,5 +98,13 @@ match queue.consume::<MyPayload>("jobs", None).await {
 ## Limitations
 
 <Warning>
-  The management API (`queue_status`) is **not supported** for the SurrealDB broker. Use `queue.size(queue_name)` for basic queue depth monitoring.
+  **Fairness queuing** (the `disambiguator` field and `ConsumeOptions::fairness`) is **not supported** for the SurrealDB broker. The disambiguator parameter is accepted but ignored.
+</Warning>
+
+<Warning>
+  The **management API** (`queue_status`) is **not supported** for the SurrealDB broker.
+</Warning>
+
+<Warning>
+  `queue.size()` also returns `BroccoliError::NotImplemented` for the SurrealDB broker. Queue depth monitoring is not available with SurrealDB.
 </Warning>

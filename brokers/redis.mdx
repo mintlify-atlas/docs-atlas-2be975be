@@ -1,5 +1,5 @@
 ---
-title: "Using Redis as the Broccoli Message Broker"
+title: "Redis Broker Setup and Internals for Broccoli"
 sidebarTitle: "Redis"
 description: "Set up Redis as Broccoli's message broker. Covers connection URLs, TLS, connection pool sizing, and how messages are stored in sorted sets."
 ---
@@ -64,7 +64,10 @@ Broccoli uses a combination of Redis sorted sets and lists to implement reliable
 | Sorted set | `{queue_name}` | Main queue; score is nanosecond timestamp (or future time for scheduling) |
 | List | `{queue_name}_processing` | Messages currently being processed |
 | Sorted set | `{queue_name}_failed` | Messages that exhausted retries |
-| Sorted set | `{queue_name}_{disambiguator}` | Per-tenant sub-queues for fairness |
+| Sorted set | `{queue_name}_{disambiguator}_queue` | Per-tenant fairness sub-queues |
+| List | `{queue_name}_{disambiguator}_processing` | In-flight messages for fairness sub-queue |
+| Set | `{queue_name}_fairness_set` | Tracks all active disambiguators |
+| List | `{queue_name}_fairness_round_robin` | Round-robin ordering of disambiguators |
 
 Messages are stored as Redis hashes with fields: `task_id`, `payload` (JSON), `attempts`, `priority`, and optionally `disambiguator`.
 

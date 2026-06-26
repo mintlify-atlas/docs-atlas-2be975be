@@ -1,10 +1,10 @@
 ---
-title: "Fair Message Queuing with Disambiguators"
+title: "Fair Message Queuing with Disambiguators in Broccoli"
 sidebarTitle: "Fairness Queues"
 description: "Use Broccoli's fairness queue feature to ensure round‑robin consumption across different tenant or user groups, preventing queue starvation."
 ---
 
-When a single high‑volume publisher dominates a queue, other producers can get starved.  Broccoli solves this problem with **fairness queues**: each producer supplies a *disambiguator* string (e.g. a tenant‑ or user‑ID) and the broker internally routes messages to sub‑queues named `{topic}_{disambiguator}`.  Consumers then rotate over those sub‑queues, guaranteeing that every tenant sees roughly equal throughput.
+When a single high‑volume publisher dominates a queue, other producers can get starved.  Broccoli solves this problem with **fairness queues** (Redis only): each producer supplies a *disambiguator* string (e.g. a tenant‑ or user‑ID) and the Redis broker internally routes messages to sub‑queues named `{topic}_{disambiguator}_queue`.  Consumers then rotate over those sub‑queues in round‑robin order, guaranteeing that every tenant sees roughly equal throughput.
 
 ### Publishing with a disambiguator
 
@@ -13,7 +13,7 @@ let tenant = "tenant-abc".to_string();
 let msg = queue.publish("jobs", Some(tenant.clone()), &job, None).await?;
 ```
 
-The `disambiguator` must be `None` for normal queues; only Redis supports fairness, so attempting to use a disambiguator with another broker will result in a `BroccoliError::NotImplemented`.
+The `disambiguator` must be `None` for normal queues. Fairness queuing is supported only on Redis; on RabbitMQ and SurrealDB, the `disambiguator` parameter is accepted but ignored.
 
 ### Consuming from a fairness queue
 
